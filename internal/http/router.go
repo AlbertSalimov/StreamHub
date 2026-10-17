@@ -1,28 +1,41 @@
-package http
+package apphttp
 
 import (
 	"net/http"
 
+	"github.com/AlbertSalimov/streamhub/internal/content"
+	"github.com/AlbertSalimov/streamhub/internal/http/handler"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/AlbertSalimov/streamhub/internal/http/handler"
 )
 
 func NewRouter(db *pgxpool.Pool) http.Handler {
-	router := chi.NewRouter()
+	r := chi.NewRouter()
 
-	router.Use(middleware.RequestID)
-	router.Use(middleware.RealIP)
-	router.Use(middleware.Recoverer)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
 
-	router.Get("/healthz", handler.Health)
+	r.Get("/healthz", handler.Health)
 
 	readiness := &handler.ReadinessHandler{
 		DB: db,
 	}
-	router.Get("/readyz", readiness.ServeHTTP)
+	r.Get("/readyz", readiness.ServeHTTP)
 
-	return router
+	repository := content.NewRepository(db)
+	service := content.NewService(repository)
+	contentHandler := handler.NewContentHandler(service)
+
+	r.Route("/api/v1/content", func(r chi.Router) {
+		r.Post("/", contentHandler.Create)
+		r.Get("/", contentHandler.List)
+		r.Get("/{id}", contentHandler.GetByID)
+		r.Patch("/{id}", contentHandler.Update)
+		r.Delete("/{id}", contentHandler.Delete)
+	})
+
+	return r
 }
