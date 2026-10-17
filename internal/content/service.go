@@ -44,16 +44,50 @@ func (s *Service) GetByID(
 
 func (s *Service) List(
 	ctx context.Context,
-	limit, offset int,
+	filter ListFilter,
 ) ([]Content, error) {
-	if limit < 1 || limit > 100 {
-		limit = 20
+	filter.Search = strings.TrimSpace(filter.Search)
+	filter.Genre = strings.TrimSpace(filter.Genre)
+
+	if len(filter.Search) > 100 {
+		return nil, fmt.Errorf("search must be at most 100 characters")
 	}
-	if offset < 0 {
-		offset = 0
+	if len(filter.Genre) > 100 {
+		return nil, fmt.Errorf("genre must be at most 100 characters")
 	}
 
-	return s.repo.List(ctx, limit, offset)
+	if filter.Year != 0 && (filter.Year < 1888 || filter.Year > 2100) {
+		return nil, fmt.Errorf("year must be between 1888 and 2100")
+	}
+
+	if filter.Limit == 0 {
+		filter.Limit = 20
+	}
+	if filter.Limit < 1 || filter.Limit > 100 {
+		return nil, fmt.Errorf("limit must be between 1 and 100")
+	}
+	if filter.Offset < 0 {
+		return nil, fmt.Errorf("offset must be zero or greater")
+	}
+
+	if filter.Sort == "" {
+		filter.Sort = "date"
+	}
+
+	switch filter.Sort {
+	case "title", "year", "date":
+	default:
+		return nil, fmt.Errorf("sort must be title, year, or date")
+	}
+
+	if filter.Order == "" {
+		filter.Order = "desc"
+	}
+	if filter.Order != "asc" && filter.Order != "desc" {
+		return nil, fmt.Errorf("order must be asc or desc")
+	}
+
+	return s.repo.List(ctx, filter)
 }
 
 func (s *Service) Update(

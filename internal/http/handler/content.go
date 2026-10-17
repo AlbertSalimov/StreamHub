@@ -39,37 +39,54 @@ func (h *ContentHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit := 20
-	offset := 0
+	query := r.URL.Query()
 
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > 100 {
-			writeError(w, http.StatusBadRequest, "limit must be between 1 and 100")
-			return
-		}
-		limit = value
+	filter := content.ListFilter{
+		Search: query.Get("search"),
+		Genre:  query.Get("genre"),
+		Sort:   query.Get("sort"),
+		Order:  query.Get("order"),
+		Limit:  20,
+		Offset: 0,
 	}
 
-	if raw := r.URL.Query().Get("offset"); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value < 0 {
-			writeError(w, http.StatusBadRequest, "offset must be zero or greater")
+	if raw := query.Get("year"); raw != "" {
+		year, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "year must be a number")
 			return
 		}
-		offset = value
+		filter.Year = year
 	}
 
-	items, err := h.service.List(r.Context(), limit, offset)
+	if raw := query.Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "limit must be a number")
+			return
+		}
+		filter.Limit = limit
+	}
+
+	if raw := query.Get("offset"); raw != "" {
+		offset, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "offset must be a number")
+			return
+		}
+		filter.Offset = offset
+	}
+
+	items, err := h.service.List(r.Context(), filter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list content")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":  items,
-		"limit":  limit,
-		"offset": offset,
+		"limit":  filter.Limit,
+		"offset": filter.Offset,
 	})
 }
 

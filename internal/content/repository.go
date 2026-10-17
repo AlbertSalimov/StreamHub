@@ -95,17 +95,56 @@ func (r *Repository) GetByID(
 
 func (r *Repository) List(
 	ctx context.Context,
-	limit, offset int,
+	filter ListFilter,
 ) ([]Content, error) {
-	const query = `
+	query := `
 		SELECT id, title, description, genre,
 		       release_year, is_published, created_at
 		FROM content
-		ORDER BY created_at DESC, id
-		LIMIT $1 OFFSET $2
+		WHERE is_published = TRUE
 	`
+	args := make([]any, 0, 5)
+	addArg := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	}
 
-	rows, err := r.db.Query(ctx, query, limit, offset)
+	if filter.Search != "" {
+		param := addArg("%" + filter.Search + "%")
+		query += " AND title ILIKE " + param
+	}
+
+	if filter.Genre != "" {
+		param := addArg(filter.Genre)
+		query += " AND genre ILIKE " + param
+	}
+
+	if filter.Year != 0 {
+		param := addArg(filter.Year)
+		query += " AND release_year = " + param
+	}
+
+	sortColumns := map[string]string{
+		"title": "title",
+		"year":  "release_year",
+		"date":  "created_at",
+	}
+
+	sortColumn, ok := sortColumns[filter.Sort]
+	if !ok {
+		sortColumn = "created_at"
+	}
+
+	sortOrder := "DESC"
+	if filter.Order == "asc" {
+		sortOrder = "ASC"
+	}
+
+	query += " ORDER BY " + sortColumn + " " + sortOrder + ", id ASC"
+	query += " LIMIT " + addArg(filter.Limit)
+	query += " OFFSET " + addArg(filter.Offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list content: %w", err)
 	}
@@ -115,6 +154,7 @@ func (r *Repository) List(
 
 	for rows.Next() {
 		var item Content
+
 		if err := rows.Scan(
 			&item.ID,
 			&item.Title,
