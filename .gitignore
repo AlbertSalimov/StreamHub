@@ -4,6 +4,7 @@
 
 bin/
 *.exe
+api
 coverage.out
 coverage.html
 

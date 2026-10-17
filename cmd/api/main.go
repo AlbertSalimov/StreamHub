@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/AlbertSalimov/streamhub/internal/config"
 	apphttp "github.com/AlbertSalimov/streamhub/internal/http"
 	"github.com/AlbertSalimov/streamhub/internal/platform"
+	"github.com/AlbertSalimov/streamhub/internal/postgres"
 )
 
 func main() {
@@ -22,9 +24,32 @@ func main() {
 		os.Exit(1)
 	}
 
+	startupCtx, cancelStartup := context.WithTimeout(
+		context.Background(),
+		15*time.Second,
+	)
+
+	db, err := postgres.NewPool(startupCtx, cfg.DatabaseURL)
+	if err != nil {
+		cancelStartup()
+		logger.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+
+	if err := postgres.RunMigrations(cfg.DatabaseURL); err != nil {
+		cancelStartup()
+		db.Close()
+		logger.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	cancelStartup()
+
+	defer db.Close()
+
 	server := &http.Server{
 		Addr:         cfg.HTTPAddr,
-		Handler:      apphttp.NewRouter(),
+		Handler:      apphttp.NewRouter(db),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,

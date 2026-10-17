@@ -12,35 +12,43 @@ type Config struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+	DatabaseURL     string
 }
 
 func Load() (Config, error) {
-	readTimeout, err := durationEnv("HTTP_READ_TIMEOUT", 5*time.Second)
-	if err != nil {
-		return Config{}, err
-	}
-
-	writeTimeout, err := durationEnv("HTTP_WRITE_TIMEOUT", 10*time.Second)
-	if err != nil {
-		return Config{}, err
-	}
-
-	idleTimeout, err := durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second)
-	if err != nil {
-		return Config{}, err
-	}
-
-	shutdownTimeout, err := durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second)
-	if err != nil {
-		return Config{}, err
-	}
-
 	cfg := Config{
-		HTTPAddr:        env("HTTP_ADDR", ":8080"),
-		ReadTimeout:     readTimeout,
-		WriteTimeout:    writeTimeout,
-		IdleTimeout:     idleTimeout,
-		ShutdownTimeout: shutdownTimeout,
+		HTTPAddr:    env("HTTP_ADDR", ":8080"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+	}
+
+	var err error
+
+	if cfg.ReadTimeout, err = durationEnv(
+		"HTTP_READ_TIMEOUT", 5*time.Second,
+	); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.WriteTimeout, err = durationEnv(
+		"HTTP_WRITE_TIMEOUT", 10*time.Second,
+	); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.IdleTimeout, err = durationEnv(
+		"HTTP_IDLE_TIMEOUT", 60*time.Second,
+	); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.ShutdownTimeout, err = durationEnv(
+		"HTTP_SHUTDOWN_TIMEOUT", 10*time.Second,
+	); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.DatabaseURL == "" {
+		return Config{}, fmt.Errorf("DATABASE_URL is required")
 	}
 
 	if cfg.ReadTimeout <= 0 ||
@@ -58,6 +66,7 @@ func env(key, fallback string) string {
 	if value == "" {
 		return fallback
 	}
+
 	return value
 }
 
