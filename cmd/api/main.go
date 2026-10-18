@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	appcache "github.com/AlbertSalimov/streamhub/internal/cache"
 	"github.com/AlbertSalimov/streamhub/internal/config"
 	apphttp "github.com/AlbertSalimov/streamhub/internal/http"
 	"github.com/AlbertSalimov/streamhub/internal/platform"
@@ -47,9 +50,37 @@ func main() {
 
 	defer db.Close()
 
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+
+	redisDB := 0
+	if raw := os.Getenv("REDIS_DB"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 {
+			slog.Error("invalid REDIS_DB")
+			return
+		}
+		redisDB = value
+	}
+
+	redisCache := appcache.NewRedis(redisAddr, redisPassword, redisDB)
+	defer redisCache.Close()
+
+	pingCtx, cancelPing := context.WithTimeout(context.Background(), time.Second)
+	err = redisCache.Ping(pingCtx)
+	cancelPing()
+
+	if err != nil {
+		slog.Warn("Redis unavailable; cache will be bypassed on errors", "error", err)
+	}
+
 	server := &http.Server{
 		Addr:         cfg.HTTPAddr,
-		Handler:      apphttp.NewRouter(db),
+		Handler:      apphttp.NewRouter(db, redisCache),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,

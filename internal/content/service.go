@@ -2,18 +2,37 @@ package content
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
 
-type Service struct {
-	repo *Repository
+type Cache interface {
+	Get(ctx context.Context, key string) ([]byte, bool, error)
+	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
+	DeleteByPrefix(ctx context.Context, prefix string) error
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+type Service struct {
+	repo  *Repository
+	cache Cache
+	ttl   time.Duration
+}
+
+func NewService(repo *Repository, caches ...Cache) *Service {
+	service := &Service{
+		repo: repo,
+		ttl:  60 * time.Second,
+	}
+
+	if len(caches) > 0 {
+		service.cache = caches[0]
+	}
+
+	return service
 }
 
 func (s *Service) Create(
@@ -32,7 +51,13 @@ func (s *Service) Create(
 		return Content{}, err
 	}
 
-	return s.repo.Create(ctx, input)
+	item, err := s.repo.Create(ctx, input)
+	if err != nil {
+		return Content{}, err
+	}
+
+	s.invalidateListCache(ctx)
+	return item, nil
 }
 
 func (s *Service) GetByID(
@@ -87,7 +112,35 @@ func (s *Service) List(
 		return nil, fmt.Errorf("order must be asc or desc")
 	}
 
-	return s.repo.List(ctx, filter)
+	key := s.cacheKey(filter)
+
+	if s.cache != nil {
+		cacheCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		data, found, err := s.cache.Get(cacheCtx, key)
+		cancel()
+
+		if err == nil && found {
+			var items []Content
+			if json.Unmarshal(data, &items) == nil {
+				return items, nil
+			}
+		}
+	}
+
+	items, err := s.repo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.cache != nil {
+		if data, marshalErr := json.Marshal(items); marshalErr == nil {
+			cacheCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			_ = s.cache.Set(cacheCtx, key, data, s.ttl)
+			cancel()
+		}
+	}
+
+	return items, nil
 }
 
 func (s *Service) Update(
@@ -121,11 +174,22 @@ func (s *Service) Update(
 		input.Description = &value
 	}
 
-	return s.repo.Update(ctx, id, input)
+	item, err := s.repo.Update(ctx, id, input)
+	if err != nil {
+		return Content{}, err
+	}
+
+	s.invalidateListCache(ctx)
+	return item, nil
 }
 
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+
+	s.invalidateListCache(ctx)
+	return nil
 }
 
 func validateFields(title, genre string, year int) error {
@@ -146,4 +210,20 @@ func validateFields(title, genre string, year int) error {
 	}
 
 	return nil
+}
+
+func (s *Service) cacheKey(filter ListFilter) string {
+	data, _ := json.Marshal(filter)
+	return "content:list:" + string(data)
+}
+
+func (s *Service) invalidateListCache(_ context.Context) {
+	if s.cache == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_ = s.cache.DeleteByPrefix(ctx, "content:list:")
 }
