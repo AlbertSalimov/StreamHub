@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -17,9 +18,10 @@ type Cache interface {
 }
 
 type Service struct {
-	repo  *Repository
-	cache Cache
-	ttl   time.Duration
+	repo      *Repository
+	cache     Cache
+	ttl       time.Duration
+	publisher EventPublisher
 }
 
 func NewService(repo *Repository, caches ...Cache) *Service {
@@ -33,6 +35,39 @@ func NewService(repo *Repository, caches ...Cache) *Service {
 	}
 
 	return service
+}
+
+func (s *Service) SetPublisher(publisher EventPublisher) {
+	s.publisher = publisher
+}
+
+func (s *Service) publishEvent(eventType string, item Content, contentID uuid.UUID) {
+	if s.publisher == nil {
+		return
+	}
+
+	event := Event{
+		ID:         uuid.New(),
+		Type:       eventType,
+		OccurredAt: time.Now().UTC(),
+		ContentID:  contentID,
+	}
+
+	if eventType != "content.deleted" {
+		event.Content = &item
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := s.publisher.Publish(ctx, event); err != nil {
+		slog.Error(
+			"failed to publish content event",
+			"event_type", eventType,
+			"content_id", contentID,
+			"error", err,
+		)
+	}
 }
 
 func (s *Service) Create(
@@ -57,6 +92,7 @@ func (s *Service) Create(
 	}
 
 	s.invalidateListCache(ctx)
+	s.publishEvent("content.created", item, item.ID)
 	return item, nil
 }
 
@@ -180,6 +216,7 @@ func (s *Service) Update(
 	}
 
 	s.invalidateListCache(ctx)
+	s.publishEvent("content.updated", item, item.ID)
 	return item, nil
 }
 
@@ -189,6 +226,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	s.invalidateListCache(ctx)
+	s.publishEvent("content.deleted", Content{}, id)
 	return nil
 }
 
@@ -226,4 +264,8 @@ func (s *Service) invalidateListCache(_ context.Context) {
 	defer cancel()
 
 	_ = s.cache.DeleteByPrefix(ctx, "content:list:")
+}
+
+func (s *Service) SetCache(cache Cache) {
+	s.cache = cache
 }

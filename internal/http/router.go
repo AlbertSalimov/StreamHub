@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func NewRouter(db *pgxpool.Pool, caches ...content.Cache) http.Handler {
+func NewRouter(db *pgxpool.Pool, deps ...any) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -26,7 +26,16 @@ func NewRouter(db *pgxpool.Pool, caches ...content.Cache) http.Handler {
 	r.Get("/readyz", readiness.ServeHTTP)
 
 	repository := content.NewRepository(db)
-	service := content.NewService(repository, caches...)
+	service := content.NewService(repository)
+
+	for _, dep := range deps {
+		switch value := dep.(type) {
+		case content.Cache:
+			service.SetCache(value)
+		case content.EventPublisher:
+			service.SetPublisher(value)
+		}
+	}
 	contentHandler := handler.NewContentHandler(service)
 
 	r.Route("/api/v1/content", func(r chi.Router) {

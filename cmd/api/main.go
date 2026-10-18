@@ -13,6 +13,7 @@ import (
 
 	appcache "github.com/AlbertSalimov/streamhub/internal/cache"
 	"github.com/AlbertSalimov/streamhub/internal/config"
+	"github.com/AlbertSalimov/streamhub/internal/events"
 	apphttp "github.com/AlbertSalimov/streamhub/internal/http"
 	"github.com/AlbertSalimov/streamhub/internal/platform"
 	"github.com/AlbertSalimov/streamhub/internal/postgres"
@@ -78,9 +79,24 @@ func main() {
 		slog.Warn("Redis unavailable; cache will be bypassed on errors", "error", err)
 	}
 
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = "nats://localhost:4222"
+	}
+
+	natsCtx, cancelNATS := context.WithTimeout(context.Background(), 5*time.Second)
+	publisher, err := events.NewPublisher(natsCtx, natsURL)
+	cancelNATS()
+
+	if err != nil {
+		slog.Error("failed to initialize NATS publisher", "error", err)
+		return
+	}
+	defer publisher.Close()
+
 	server := &http.Server{
 		Addr:         cfg.HTTPAddr,
-		Handler:      apphttp.NewRouter(db, redisCache),
+		Handler:      apphttp.NewRouter(db, redisCache, publisher),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -103,6 +119,12 @@ func main() {
 			serverErrors <- err
 		}
 		close(serverErrors)
+	}()
+
+	go func() {
+		if err := events.RunConsumer(ctx, natsURL); err != nil && ctx.Err() == nil {
+			slog.Error("NATS consumer stopped", "error", err)
+		}
 	}()
 
 	select {
