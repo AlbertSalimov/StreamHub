@@ -1,4 +1,4 @@
-.PHONY: run build vet fmt db-ready test test-integration check docker-build docker-up docker-down docker-logs docker-ps
+.PHONY: run build vet fmt db-ready test integration check docker-build docker-up docker-down docker-logs docker-ps ci fmt-check
 
 run:
 	set -a; . ./.env; set +a; go run ./cmd/api
@@ -6,7 +6,7 @@ run:
 test:
 	go test ./...
 
-test-integration:
+integration:
 	go test ./internal/content -run TestRepositoryIntegration -v
 
 build:
@@ -41,3 +41,14 @@ docker-logs:
 
 docker-ps:
 	docker compose ps
+
+fmt-check:
+	@test -z "$$(gofmt -l cmd internal)" || \
+		(echo "Run gofmt -w cmd internal"; gofmt -l cmd internal; exit 1)
+
+ci: fmt-check
+	go vet ./...
+	go test ./...
+	go test -race ./...
+	go build ./cmd/api
+	docker build -t streamhub:ci .
