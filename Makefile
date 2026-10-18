@@ -1,4 +1,4 @@
-.PHONY: run build vet fmt up down logs db-ready test test-integration check
+.PHONY: run build vet fmt db-ready test test-integration check docker-build docker-up docker-down docker-logs docker-ps
 
 run:
 	set -a; . ./.env; set +a; go run ./cmd/api
@@ -24,14 +24,20 @@ check:
 	go test ./...
 	go build ./cmd/api
 
-up:
-	docker compose up -d postgres
-
-down:
-	docker compose down
-
-logs:
-	docker compose logs -f postgres
-
 db-ready:
 	docker compose exec postgres pg_isready -U streamhub -d streamhub
+
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up --build -d
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f api
+
+docker-ps:
+	docker compose ps
